@@ -11,7 +11,7 @@
         body {
             font-family: 'Inter', 'Kanit', sans-serif;
         }
-        .modal-backdrop {
+        .modal-backdrop, .loading-overlay {
             display: none;
             position: fixed;
             top: 0;
@@ -20,6 +20,8 @@
             height: 100%;
             background-color: rgba(0,0,0,0.5);
             z-index: 40;
+            justify-content: center;
+            align-items: center;
         }
         .modal {
             display: none;
@@ -29,17 +31,34 @@
             transform: translate(-50%, -50%);
             z-index: 50;
         }
-        .modal-backdrop.active, .modal.active {
-            display: block;
+        .modal-backdrop.active, .modal.active, .loading-overlay.active {
+            display: flex; /* Changed to flex for centering spinner */
+        }
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #ffffff;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800">
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="spinner"></div>
+    </div>
+
 
     <div class="container mx-auto p-4 md:p-8">
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold text-gray-700">ระบบจัดการรายการสินค้า (SKU)</h1>
-            <p class="text-gray-500 mt-2">เพิ่ม แก้ไข และลบรายการสินค้าของคุณ</p>
+            <p class="text-gray-500 mt-2">เพิ่ม แก้ไข และลบรายการสินค้าของคุณ (เชื่อมต่อ Google Sheets)</p>
         </header>
 
         <main>
@@ -108,177 +127,212 @@
 
 
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const productForm = document.getElementById('product-form');
-            const productList = document.getElementById('product-list');
-            const noProductsMessage = document.getElementById('no-products-message');
-            const productIdInput = document.getElementById('product-id');
-            const productSkuInput = document.getElementById('product-sku');
-            const productPriceInput = document.getElementById('product-price');
-            const productDetailsInput = document.getElementById('product-details');
-            const formTitle = document.getElementById('form-title');
-            const submitButton = document.getElementById('submit-button');
-            const cancelEditButton = document.getElementById('cancel-edit-button');
+        // Google Apps Script URL and Sheet ID
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxMaEdCWFRQqULJ4pnO5xWcg1gZEZ3hiUxbsCwsOJd6xYjVCXQ9f_6ZrPHHrLkx9Qam3Q/exec";
+        const SHEET_ID = "1FNVknUeANTnPQ-q9euleOPA3tQz7gRBMbOyLH7ufWGs";
+        
+        // --- Global state ---
+        let products = [];
+        let productToDeleteId = null;
 
-            // Modal elements
-            const deleteModal = document.getElementById('delete-modal');
-            const deleteModalBackdrop = document.getElementById('delete-modal-backdrop');
-            const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
-            const cancelDeleteBtn = document.getElementById('cancel-delete-btn');
-            
-            let productToDeleteId = null;
+        // --- DOM Elements ---
+        const productForm = document.getElementById('product-form');
+        const productList = document.getElementById('product-list');
+        const noProductsMessage = document.getElementById('no-products-message');
+        const productIdInput = document.getElementById('product-id');
+        const productSkuInput = document.getElementById('product-sku');
+        const productPriceInput = document.getElementById('product-price');
+        const productDetailsInput = document.getElementById('product-details');
+        const formTitle = document.getElementById('form-title');
+        const submitButton = document.getElementById('submit-button');
+        const cancelEditButton = document.getElementById('cancel-edit-button');
+        const deleteModal = document.getElementById('delete-modal');
+        const deleteModalBackdrop = document.getElementById('delete-modal-backdrop');
+        const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
+        const cancelDeleteBtn = document.getElementById('cancel-delete-btn');
+        const loadingOverlay = document.getElementById('loading-overlay');
 
-            // ใช้ Local Storage เพื่อเก็บข้อมูลสินค้า
-            let products = JSON.parse(localStorage.getItem('products')) || [
-                { id: 1, sku: 'TSHIRT-001-BLK', price: 290, details: 'https://www.example.com/tshirt-black' },
-                { id: 2, sku: 'JEANS-005-BLU', price: 790, details: 'https://www.example.com/jeans-blue' },
-                { id: 3, sku: 'CAP-002-RED', price: 150, details: '' },
-            ];
-            
-            // ฟังก์ชันสำหรับบันทึกข้อมูลลง Local Storage
-            const saveProducts = () => {
-                localStorage.setItem('products', JSON.stringify(products));
-            };
 
-            // ฟังก์ชันสำหรับแสดงผลสินค้าในตาราง
-            const renderProducts = () => {
-                productList.innerHTML = ''; // เคลียร์ข้อมูลเก่า
-                if (products.length === 0) {
-                    noProductsMessage.classList.remove('hidden');
-                } else {
-                    noProductsMessage.classList.add('hidden');
-                    products.forEach(product => {
-                        const tr = document.createElement('tr');
-                        tr.className = 'border-b hover:bg-gray-50';
+        // --- UI Functions ---
+        const showLoading = (show) => {
+            loadingOverlay.classList.toggle('active', show);
+        };
+        
+        const renderProducts = () => {
+            productList.innerHTML = '';
+            if (products.length === 0) {
+                noProductsMessage.classList.remove('hidden');
+            } else {
+                noProductsMessage.classList.add('hidden');
+                products.forEach(product => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'border-b hover:bg-gray-50';
 
-                        let linkHTML = '-';
-                        if (product.details && product.details.trim() !== '') {
-                            let url = product.details.trim();
-                            // เพิ่ม https:// ถ้ายังไม่มี เพื่อให้ลิงก์ทำงานถูกต้อง
-                            if (!url.startsWith('http://') && !url.startsWith('https://')) {
-                                url = 'https://' + url;
-                            }
-                            linkHTML = `<a href="${url}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center text-blue-600 hover:underline hover:text-blue-800 font-medium py-1 px-2 rounded-md transition-colors duration-200">
-                                            <i class="fas fa-external-link-alt mr-2"></i>เปิดลิงก์
-                                        </a>`;
+                    let linkHTML = '-';
+                    if (product.details && String(product.details).trim() !== '') {
+                        let url = String(product.details).trim();
+                        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                            url = 'https://' + url;
                         }
-
-                        tr.innerHTML = `
-                            <td class="p-4 text-gray-600">${product.sku}</td>
-                            <td class="p-4">${linkHTML}</td>
-                            <td class="p-4 text-gray-600">${Number(product.price).toLocaleString('th-TH')}</td>
-                            <td class="p-4 text-center">
-                                <button data-id="${product.id}" class="edit-btn text-blue-500 hover:text-blue-700 p-2"><i class="fas fa-edit"></i></button>
-                                <button data-id="${product.id}" class="delete-btn text-red-500 hover:text-red-700 p-2"><i class="fas fa-trash"></i></button>
-                            </td>
-                        `;
-                        productList.appendChild(tr);
-                    });
-                }
-            };
-
-            // ฟังก์ชันสำหรับรีเซ็ตฟอร์ม
-            const resetForm = () => {
-                productForm.reset();
-                productIdInput.value = '';
-                formTitle.textContent = 'เพิ่มสินค้าใหม่';
-                submitButton.innerHTML = '<i class="fas fa-plus mr-2"></i><span>เพิ่มสินค้า</span>';
-                cancelEditButton.classList.add('hidden');
-            };
-
-            // จัดการการ submit ฟอร์ม (ทั้งเพิ่มและแก้ไข)
-            productForm.addEventListener('submit', (e) => {
-                e.preventDefault();
-                
-                const id = productIdInput.value;
-                const sku = productSkuInput.value.trim();
-                const price = parseFloat(productPriceInput.value);
-                const details = productDetailsInput.value.trim();
-
-                if (!sku || isNaN(price) || price < 0) {
-                    alert('กรุณากรอกข้อมูลให้ครบถ้วนและถูกต้อง');
-                    return;
-                }
-
-                if (id) { // ถ้ามี id คือการแก้ไข
-                    const index = products.findIndex(p => p.id == id);
-                    if (index !== -1) {
-                        products[index] = { id: Number(id), sku, price, details };
+                        linkHTML = `<a href="${url}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center text-blue-600 hover:underline hover:text-blue-800 font-medium py-1 px-2 rounded-md transition-colors duration-200">
+                                        <i class="fas fa-external-link-alt mr-2"></i>เปิดลิงก์
+                                    </a>`;
                     }
-                } else { // ถ้าไม่มี id คือการเพิ่มใหม่
-                    const newProduct = {
-                        id: Date.now(), // สร้าง id ที่ไม่ซ้ำกัน
-                        sku,
-                        price,
-                        details
-                    };
-                    products.push(newProduct);
+
+                    tr.innerHTML = `
+                        <td class="p-4 text-gray-600">${product.sku}</td>
+                        <td class="p-4">${linkHTML}</td>
+                        <td class="p-4 text-gray-600">${Number(product.price).toLocaleString('th-TH')}</td>
+                        <td class="p-4 text-center">
+                            <button data-id="${product.id}" class="edit-btn text-blue-500 hover:text-blue-700 p-2"><i class="fas fa-edit"></i></button>
+                            <button data-id="${product.id}" class="delete-btn text-red-500 hover:text-red-700 p-2"><i class="fas fa-trash"></i></button>
+                        </td>
+                    `;
+                    productList.appendChild(tr);
+                });
+            }
+        };
+
+        const resetForm = () => {
+            productForm.reset();
+            productIdInput.value = '';
+            formTitle.textContent = 'เพิ่มสินค้าใหม่';
+            submitButton.innerHTML = '<i class="fas fa-plus mr-2"></i><span>เพิ่มสินค้า</span>';
+            cancelEditButton.classList.add('hidden');
+        };
+
+        const closeDeleteModal = () => {
+            deleteModal.classList.remove('active');
+            deleteModalBackdrop.classList.remove('active');
+            productToDeleteId = null;
+        };
+
+        // --- JSONP Communication with Google Apps Script ---
+        
+        // This is the global callback function that Google Scripts will call
+        window.handleResponse = (response) => {
+            showLoading(false);
+            if(response.status === 'success'){
+                if(response.data){
+                    products = response.data;
+                    renderProducts();
+                } else {
+                    // For create, update, delete operations, just refetch all data
+                    fetchProducts();
                 }
-                
-                saveProducts();
-                renderProducts();
-                resetForm();
-            });
+                 if(response.message){
+                    console.log(response.message);
+                }
+            } else {
+                alert('เกิดข้อผิดพลาด: ' + response.message);
+            }
+        };
+
+        const callAppsScript = (action, params = {}, showLoader = true) => {
+            if (showLoader) {
+                showLoading(true);
+            }
+            let url = `${SCRIPT_URL}?action=${action}&sheetId=${SHEET_ID}&callback=handleResponse`;
+            for (const key in params) {
+                url += `&${key}=${encodeURIComponent(params[key])}`;
+            }
             
-            // จัดการการกดปุ่มในตาราง (แก้ไข และ ลบ)
-            productList.addEventListener('click', (e) => {
-                const target = e.target.closest('button');
-                if (!target) return;
-
-                const id = target.dataset.id;
-                
-                if (target.classList.contains('edit-btn')) {
-                    // แก้ไขสินค้า
-                    const product = products.find(p => p.id == id);
-                    if (product) {
-                        productIdInput.value = product.id;
-                        productSkuInput.value = product.sku;
-                        productPriceInput.value = product.price;
-                        productDetailsInput.value = product.details;
-
-                        formTitle.textContent = 'แก้ไขข้อมูลสินค้า';
-                        submitButton.innerHTML = '<i class="fas fa-save mr-2"></i><span>บันทึกการแก้ไข</span>';
-                        cancelEditButton.classList.remove('hidden');
-                        window.scrollTo(0, 0); // เลื่อนขึ้นไปบนสุด
-                    }
-                } else if (target.classList.contains('delete-btn')) {
-                    // ลบสินค้า
-                    productToDeleteId = id;
-                    deleteModal.classList.add('active');
-                    deleteModalBackdrop.classList.add('active');
-                }
-            });
-
-            // ปุ่มยกเลิกการแก้ไข
-            cancelEditButton.addEventListener('click', resetForm);
-
-            // ฟังก์ชันปิด Modal
-            const closeDeleteModal = () => {
-                deleteModal.classList.remove('active');
-                deleteModalBackdrop.classList.remove('active');
-                productToDeleteId = null;
+            // Remove old script tag if it exists
+            const oldScript = document.getElementById('jsonp-script');
+            if (oldScript) {
+                oldScript.parentNode.removeChild(oldScript);
             }
 
-            // จัดการการลบเมื่อยืนยัน
-            confirmDeleteBtn.addEventListener('click', () => {
-                if(productToDeleteId){
-                    products = products.filter(p => p.id != productToDeleteId);
-                    saveProducts();
-                    renderProducts();
-                    closeDeleteModal();
-                }
-            });
+            // Create and append new script tag
+            const script = document.createElement('script');
+            script.id = 'jsonp-script';
+            script.src = url;
+            document.body.appendChild(script);
+        };
 
-            // ปิด Modal เมื่อกดยกเลิก หรือพื้นหลัง
-            cancelDeleteBtn.addEventListener('click', closeDeleteModal);
-            deleteModalBackdrop.addEventListener('click', closeDeleteModal);
+        // --- CRUD Functions ---
+        const fetchProducts = () => {
+            callAppsScript('read', {}, false); // ไม่แสดง loading ตอนเข้าหน้าเว็บครั้งแรก
+        };
+
+        const addProduct = (product) => {
+            callAppsScript('create', product);
+        };
+
+        const updateProduct = (product) => {
+            callAppsScript('update', product);
+        };
+
+        const deleteProduct = (id) => {
+            callAppsScript('delete', { id: id });
+        };
+
+
+        // --- Event Listeners ---
+        document.addEventListener('DOMContentLoaded', fetchProducts);
+
+        productForm.addEventListener('submit', (e) => {
+            e.preventDefault();
             
-            // แสดงผลครั้งแรกเมื่อโหลดหน้า
-            renderProducts();
+            const productData = {
+                id: productIdInput.value,
+                sku: productSkuInput.value.trim(),
+                price: parseFloat(productPriceInput.value),
+                details: productDetailsInput.value.trim()
+            };
+
+            if (!productData.sku || isNaN(productData.price) || productData.price < 0) {
+                alert('กรุณากรอกข้อมูลให้ครบถ้วนและถูกต้อง');
+                return;
+            }
+
+            if (productData.id) { // Update existing product
+                updateProduct(productData);
+            } else { // Add new product
+                addProduct(productData);
+            }
+            resetForm();
         });
+        
+        productList.addEventListener('click', (e) => {
+            const target = e.target.closest('button');
+            if (!target) return;
+
+            const id = target.dataset.id;
+            
+            if (target.classList.contains('edit-btn')) {
+                const product = products.find(p => p.id == id);
+                if (product) {
+                    productIdInput.value = product.id;
+                    productSkuInput.value = product.sku;
+                    productPriceInput.value = product.price;
+                    productDetailsInput.value = product.details;
+
+                    formTitle.textContent = 'แก้ไขข้อมูลสินค้า';
+                    submitButton.innerHTML = '<i class="fas fa-save mr-2"></i><span>บันทึกการแก้ไข</span>';
+                    cancelEditButton.classList.remove('hidden');
+                    window.scrollTo(0, 0);
+                }
+            } else if (target.classList.contains('delete-btn')) {
+                productToDeleteId = id;
+                deleteModal.classList.add('active');
+                deleteModalBackdrop.classList.add('active');
+            }
+        });
+
+        cancelEditButton.addEventListener('click', resetForm);
+
+        confirmDeleteBtn.addEventListener('click', () => {
+            if(productToDeleteId){
+                deleteProduct(productToDeleteId);
+                closeDeleteModal();
+            }
+        });
+
+        cancelDeleteBtn.addEventListener('click', closeDeleteModal);
+        deleteModalBackdrop.addEventListener('click', closeDeleteModal);
+
     </script>
 </body>
 </html>
-
-
 
