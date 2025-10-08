@@ -65,21 +65,17 @@
             <!-- ส่วนฟอร์มสำหรับเพิ่มและแก้ไขข้อมูล -->
             <div class="bg-white p-6 rounded-lg shadow-md mb-8">
                 <h2 id="form-title" class="text-2xl font-semibold mb-4 text-gray-700">เพิ่มสินค้าใหม่</h2>
-                <form id="product-form" class="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                <form id="product-form" class="grid grid-cols-1 gap-4 items-end">
                     <input type="hidden" id="product-id">
                     <div>
                         <label for="product-sku" class="block text-sm font-medium text-gray-600 mb-1">SKU</label>
                         <input type="text" id="product-sku" placeholder="เช่น TSHIRT-001-BLK" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
                     </div>
                     <div>
-                        <label for="product-price" class="block text-sm font-medium text-gray-600 mb-1">ราคา (บาท)</label>
-                        <input type="number" id="product-price" placeholder="เช่น 250" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
-                    </div>
-                    <div class="md:col-span-2">
                         <label for="product-details" class="block text-sm font-medium text-gray-600 mb-1">ลิงก์สั่งซื้อ (ถ้ามี)</label>
                         <input type="text" id="product-details" placeholder="เช่น https://www.example.com/product/123" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                     </div>
-                    <div class="flex space-x-2 md:col-span-2">
+                    <div class="flex space-x-2">
                          <button type="submit" id="submit-button" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-700 transition duration-300 flex items-center justify-center">
                             <i class="fas fa-plus mr-2"></i><span>เพิ่มสินค้า</span>
                         </button>
@@ -97,7 +93,6 @@
                         <tr>
                             <th class="p-4 text-left text-sm font-semibold text-gray-600">SKU</th>
                             <th class="p-4 text-left text-sm font-semibold text-gray-600">ลิงก์สั่งซื้อ</th>
-                            <th class="p-4 text-left text-sm font-semibold text-gray-600">ราคา</th>
                             <th class="p-4 text-center text-sm font-semibold text-gray-600">การกระทำ</th>
                         </tr>
                     </thead>
@@ -141,7 +136,6 @@
         const noProductsMessage = document.getElementById('no-products-message');
         const productIdInput = document.getElementById('product-id');
         const productSkuInput = document.getElementById('product-sku');
-        const productPriceInput = document.getElementById('product-price');
         const productDetailsInput = document.getElementById('product-details');
         const formTitle = document.getElementById('form-title');
         const submitButton = document.getElementById('submit-button');
@@ -182,7 +176,6 @@
                     tr.innerHTML = `
                         <td class="p-4 text-gray-600">${product.sku}</td>
                         <td class="p-4">${linkHTML}</td>
-                        <td class="p-4 text-gray-600">${Number(product.price).toLocaleString('th-TH')}</td>
                         <td class="p-4 text-center">
                             <button data-id="${product.id}" class="edit-btn text-blue-500 hover:text-blue-700 p-2"><i class="fas fa-edit"></i></button>
                             <button data-id="${product.id}" class="delete-btn text-red-500 hover:text-red-700 p-2"><i class="fas fa-trash"></i></button>
@@ -256,7 +249,7 @@
         };
 
         const addProduct = (product) => {
-            callAppsScript('create', product);
+            callAppsScript('create', product, false);
         };
 
         const updateProduct = (product) => {
@@ -264,7 +257,7 @@
         };
 
         const deleteProduct = (id) => {
-            callAppsScript('delete', { id: id });
+            callAppsScript('delete', { id: id }, false);
         };
 
 
@@ -277,12 +270,11 @@
             const productData = {
                 id: productIdInput.value,
                 sku: productSkuInput.value.trim(),
-                price: parseFloat(productPriceInput.value),
                 details: productDetailsInput.value.trim()
             };
 
-            if (!productData.sku || isNaN(productData.price) || productData.price < 0) {
-                alert('กรุณากรอกข้อมูลให้ครบถ้วนและถูกต้อง');
+            if (!productData.sku) {
+                alert('กรุณากรอกข้อมูล SKU');
                 return;
             }
 
@@ -305,7 +297,6 @@
                 if (product) {
                     productIdInput.value = product.id;
                     productSkuInput.value = product.sku;
-                    productPriceInput.value = product.price;
                     productDetailsInput.value = product.details;
 
                     formTitle.textContent = 'แก้ไขข้อมูลสินค้า';
